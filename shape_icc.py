@@ -8,7 +8,7 @@ Smith TB, Smith N. Agreement and reliability statistics for shapes. PLoS One. 20
 
 #MIT License
 #
-#Copyright (c) Gordon Stevenson 2018
+#Copyright (c) Gordon Stevenson 2018-2020
 #
 #Permission is hereby granted, free of charge, to any person obtaining a copy
 #of this software and associated documentation files (the "Software"), to deal
@@ -29,12 +29,12 @@ Smith TB, Smith N. Agreement and reliability statistics for shapes. PLoS One. 20
 #SOFTWARE.
 
 import scipy.io as sio
+import scipy.stats as sstats
 import numpy as np
-from icc import *
 
 def shape_icc(M):
     """SHAPEICC Shape intraclass correlation coefficient.
-    Calculates ICC is for a two-way, fully crossed random efects model.
+    Calculates ICC is for a two-way, fully crossed random effects model.
     This type of ICC is appropriate to describe the absolute agreement 
     among shape measurements from a group of k raters, randomly selected 
     from the population of all raters, made on a set of n items.  
@@ -52,6 +52,7 @@ def shape_icc(M):
     """
     # setup size
     sizeM = M.shape
+    #k - num raters; n - num subjects
     k = sizeM[-1]
     n = sizeM[-2]
     Npix = np.prod(sizeM[0:-2])  #Npix = Ny * Nx * ... = total # of pixels in each shape
@@ -84,24 +85,29 @@ def shape_icc(M):
 
     MSE = (SS - (n-1)*MSR - (k-1)*MSC) / ((n-1)*(k-1))
     icc = (MSR - MSE) / (MSR + (k-1)*MSE + k/n*(MSC-MSE))
-    return icc
+    
+   #from ICC(A,1) - in IRR package
+    ns = n
+    nr = k
+    coeff = (MSR - MSE)/(MSR + (nr - 1) * MSE + 
+                  (nr/ns) * (MSC - MSE))
+    r0 = 0
+    a = (nr * r0)/(ns * (1 - r0))
+    b = (nr * r0 * (ns - 1))/(ns * (1 - r0))    
+    Fvalue = MSR/(a * MSC + b * MSE)
 
-if __name__ == '__main__':
-    data = sio.loadmat('./data.mat')
-    data = data['data']
+    alpha = 1 - 0.95
+    a = (nr * coeff)/(ns * (1 - coeff))
+    b = 1 + (nr * coeff * (ns - 1))/(ns * (1 - coeff))
+    v = (a * MSC + b * MSE)**2/((a * MSC)**2/(nr - 1) + (b * MSE)**2/((ns - 1) * (nr - 1)))
+    #p.value <- pf(Fvalue, df1, df2, lower.tail = FALSE)
+    #FL <- qf(1 - alpha/2, ns - 1, v)
+    #FU <- qf(1 - alpha/2, v, ns - 1)
 
-    Ny,Nx,Npts,Nraters,Nreps = data.shape
+    FL = sstats.f.ppf(1 - alpha/2, ns - 1, v)
+    FU = sstats.f.ppf(1 - alpha/2, v, ns - 1)
 
-    area_icc_arr = np.zeros([Nreps,1])
-    shape_icc_arr = np.zeros([Nreps,1])
+    lbound = (ns * (MSR - FL * MSE))/(FL * (nr * MSC + (nr * ns - nr - ns) * MSE) + ns * MSR)
+    ubound = (ns * (FU * MSR - MSE))/(nr * MSC + (nr * ns - nr - ns) * MSE + ns * FU * MSR)
 
-    # calculate shape and area ICC for each repetition of the simulated experiment
-    for rr in np.arange(0,Nreps):    
-        print('Analyzing rep {} of {}\n'.format(rr,Nreps))    
-        
-        measured_shapes = data[:,:,:,:,rr]
-        measured_areas = np.squeeze(np.sum(np.sum(measured_shapes,0),0))
-        
-        area_icc_arr[rr] = icc(measured_areas)
-        shape_icc_arr[rr] = shape_icc(measured_shapes) # shape ICC for all shapes for this rep
-    print('area icc {} \t shape icc {}'.format(np.mean(area_icc_arr),np.mean(shape_icc_arr)))
+    return icc, Fvalue, lbound, ubound
